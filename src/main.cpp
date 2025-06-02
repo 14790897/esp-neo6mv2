@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <secrets.h>
 #include <SoftwareSerial.h>
-#include <TinyGPSPlus.h>
+#include <TinyGPS++.h> //TinyGPSPlus.h不行，而TinyGPS++.h可以
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 
@@ -66,6 +66,14 @@ void setup() {
 }
 
 void loop() {
+  // 每2秒输出一次调试日志，表明主循环正常运行
+  static unsigned long lastDebug = 0;
+  if (millis() - lastDebug > 2000)
+  {
+    addLog("[DEBUG] loop running, waiting for GPS data...");
+    lastDebug = millis();
+  }
+
   // 检查是否有来自 GPS 模块的数据
   if (gpsSerial.available() > 0) {
     char c = gpsSerial.read();
