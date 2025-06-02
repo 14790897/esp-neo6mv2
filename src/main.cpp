@@ -36,6 +36,18 @@ void addLog(const String &msg) {
 String gpsDataHtml() {
   String html = "<html><head><meta charset='utf-8'><title>GPS Data</title>";
   html += R"(
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6fa; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 30px auto; background: #fff; border-radius: 10px; box-shadow: 0 2px 8px #0001; padding: 24px; }
+    h2 { color: #2a5d9f; margin-top: 0; }
+    .gps-data p { margin: 6px 0; font-size: 1.1em; }
+    .log-title { margin: 18px 0 6px 0; color: #444; font-size: 1.1em; }
+    .log-box { font-family:monospace; white-space:pre-wrap; border:1px solid #ccc; padding:8px; height:200px; overflow:auto; background:#f9f9f9; border-radius: 6px; }
+    .btn-row { display: flex; gap: 12px; margin: 18px 0 0 0; }
+    button { background: #2a5d9f; color: #fff; border: none; border-radius: 5px; padding: 10px 22px; font-size: 1em; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #17406b; }
+    .status { margin: 10px 0 0 0; color: #888; font-size: 0.98em; }
+  </style>
   <script>
     function fetchData() {
       fetch('/data').then(r=>r.text()).then(html=>{
@@ -46,26 +58,32 @@ String gpsDataHtml() {
     window.onload = fetchData;
   </script>
   )";
-  html += "</head><body>";
+  html += "</head><body><div class='container'>";
   html += "<div id='main'>加载中...</div>";
-  html += "<form method='POST' action='/start'><button type='submit'>开始码表</button></form>";
-  html += "<form method='POST' action='/stop'><button type='submit'>结束码表</button></form>";
-  html += "</body></html>";
+  html += "<div class='btn-row'>";
+  html += "<form method='POST' action='/start' style='display:inline;'><button type='submit'>开始码表</button></form>";
+  html += "<form method='POST' action='/stop' style='display:inline;'><button type='submit'>结束码表</button></form>";
+  html += "</div>";
+  html += "<div class='status'>页面每2秒自动刷新</div>";
+  html += "</div></body></html>";
   return html;
 }
 
 String gpsDataInnerHtml()
 {
-  String html = "<h2>GPS 实时数据</h2>";
+  String html = "<div class='gps-data'>";
+  html += "<h2>GPS 实时数据</h2>";
   if (gps.location.isValid()) {
-    html += "<p>纬度: " + String(gps.location.lat(), 6) + "</p>";
-    html += "<p>经度: " + String(gps.location.lng(), 6) + "</p>";
-    html += "<p>海拔: " + String(gps.altitude.meters()) + " m</p>";
-    html += "<p>速度: " + String(gps.speed.kmph()) + " km/h</p>";
+    html += "<p>纬度: <b>" + String(gps.location.lat(), 6) + "</b></p>";
+    html += "<p>经度: <b>" + String(gps.location.lng(), 6) + "</b></p>";
+    html += "<p>海拔: <b>" + String(gps.altitude.meters()) + " m</b></p>";
+    html += "<p>速度: <b>" + String(gps.speed.kmph()) + " km/h</b></p>";
   } else {
-    html += "<p>等待 GPS 定位数据...</p>";
+    html += "<p style='color:#c00;'>等待 GPS 定位数据...</p>";
   }
-  html += "<h3>串口日志</h3><div style='font-family:monospace;white-space:pre-wrap;border:1px solid #ccc;padding:8px;height:200px;overflow:auto;background:#f9f9f9;'>" + logBuffer + "</div>";
+  html += "</div>";
+  html += "<div class='log-title'>串口日志</div>";
+  html += "<div class='log-box'>" + logBuffer + "</div>";
   return html;
 }
 
