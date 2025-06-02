@@ -16,6 +16,7 @@ ESP8266WebServer server(80);
 
 
 String logBuffer = "";
+String lineBuffer = "";
 
 void addLog(const String &msg) {
   logBuffer += msg + "<br>";
@@ -70,7 +71,16 @@ void loop() {
     char c = gpsSerial.read();
     Serial.write(c); // 打印所有GPS原始数据，便于调试
     gps.encode(c);  // 解码接收到的 GPS 数据
-    addLog(String(c)); // 记录原始GPS数据到网页日志
+
+    if (c == '\n')
+    {
+      addLog(lineBuffer);
+      lineBuffer = "";
+    }
+    else if (c != '\r')
+    {
+      lineBuffer += c;
+    }
 
     // 如果 GPS 数据更新了，打印相关信息
     if (gps.location.isUpdated()) {
