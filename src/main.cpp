@@ -25,6 +25,17 @@ unsigned long tripStartTime = 0;
 unsigned long tripEndTime = 0;
 String tripFileName = "";
 
+// WiFi 配置相关变量
+#ifdef ssid
+const char *wifiSsid = ssid;
+const char *wifiPass = password;
+bool wifiConfigured = true;
+#else
+String wifiSsid = "";
+String wifiPass = "";
+bool wifiConfigured = false;
+#endif
+
 void addLog(const String &msg) {
   logBuffer += msg + "<br>";
   // 限制日志长度，避免内存溢出
@@ -155,6 +166,72 @@ void writeTripData(double lat, double lng, double alt, double speed)
   }
 }
 
+void handleWifiConfig()
+{
+  String html = "<html><head><meta charset='utf-8'><title>WiFi配置</title>";
+  html += R"(
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6fa; }
+    .container { max-width: 400px; margin: 40px auto; background: #fff; border-radius: 10px; box-shadow: 0 2px 8px #0001; padding: 24px; }
+    h2 { color: #2a5d9f; }
+    label { display:block; margin: 12px 0 4px 0; }
+    input { width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #bbb; margin-bottom: 12px; }
+    button { background: #2a5d9f; color: #fff; border: none; border-radius: 5px; padding: 10px 22px; font-size: 1em; cursor: pointer; width: 100%; }
+    button:hover { background: #17406b; }
+    .msg { color: #c00; margin: 10px 0; }
+  </style>
+  )";
+  html += "</head><body><div class='container'>";
+  html += "<h2>WiFi 配置</h2>";
+  html += "<form method='POST' action='/wifi_save'>";
+  html += "<label>WiFi名称(SSID)</label><input name='ssid' required>";
+  html += "<label>WiFi密码</label><input name='pass' type='password'>";
+  html += "<button type='submit'>保存并连接</button>";
+  html += "</form>";
+  html += "</div></body></html>";
+  server.send(200, "text/html", html);
+}
+
+void handleWifiSave()
+{
+  if (server.hasArg("ssid"))
+    wifiSsid = server.arg("ssid");
+  if (server.hasArg("pass"))
+    wifiPass = server.arg("pass");
+  wifiConfigured = true;
+  String html = "<html><meta charset='utf-8'><body><h2>WiFi配置已保存，正在重启...</h2></body></html>";
+  server.send(200, "text/html", html);
+  delay(1000);
+  ESP.restart();
+}
+
+void tryLoadWifiConfig()
+{
+#ifndef ssid
+  File f = LittleFS.open("/wifi.txt", "r");
+  if (f)
+  {
+    wifiSsid = f.readStringUntil('\n');
+    wifiSsid.trim();
+    wifiPass = f.readStringUntil('\n');
+    wifiPass.trim();
+    wifiConfigured = wifiSsid.length() > 0;
+    f.close();
+  }
+#endif
+}
+
+void saveWifiConfig()
+{
+  File f = LittleFS.open("/wifi.txt", "w");
+  if (f)
+  {
+    f.println(wifiSsid);
+    f.println(wifiPass);
+    f.close();
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println("Booting...");
@@ -163,9 +240,29 @@ void setup() {
     Serial.println("LittleFS mount failed");
     addLog("[ERROR] LittleFS mount failed");
   }
-  gpsSerial.begin(9600);         // 初始化 GPS 模块的串口通信
-  WiFi.begin(ssid, password);    // 连接到 Wi-Fi 网络
-
+  tryLoadWifiConfig();
+#ifdef ssid
+  // secrets.h已定义，直接连接
+  gpsSerial.begin(9600);
+  WiFi.begin(wifiSsid, wifiPass);
+#else
+  if (!wifiConfigured)
+  {
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP("GPS-Config", "12345678");
+    server.on("/", handleWifiConfig);
+    server.on("/wifi_save", HTTP_POST, handleWifiSave);
+    server.begin();
+    Serial.println("WiFi config AP started");
+    while (true)
+    {
+      server.handleClient();
+      delay(10);
+    }
+  }
+  gpsSerial.begin(9600);
+  WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
+#endif
   // 等待 Wi-Fi 连接成功
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
