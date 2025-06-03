@@ -5,6 +5,19 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <LittleFS.h>
+#ifdef USE_OLED_SCREEN
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#endif
+#ifdef USE_ST7735_SCREEN
+#include <Adafruit_GFX.h>
+#include <Adafruit_ST7735.h>
+#include <SPI.h>
+#define TFT_CS D8
+#define TFT_RST D4
+#define TFT_DC D3
+Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_RST);
+#endif
 
 // 定义 GPS 模块的 RX 和 TX 引脚
 #define RX_PIN 4   // D2 (GPIO4)
@@ -15,6 +28,12 @@ SoftwareSerial gpsSerial(RX_PIN, TX_PIN);
 TinyGPSPlus gps;
 ESP8266WebServer server(80);
 
+#ifdef USE_OLED_SCREEN
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+#endif
 
 String logBuffer = "";
 String lineBuffer = "";
@@ -232,6 +251,73 @@ void saveWifiConfig()
   }
 }
 
+#ifdef USE_OLED_SCREEN
+void updateOled()
+{
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("GPS 码表");
+  display.setTextSize(1);
+  if (gps.location.isValid())
+  {
+    display.printf("Lat: %.6f\n", gps.location.lat());
+    display.printf("Lng: %.6f\n", gps.location.lng());
+    display.printf("Alt: %.1f m\n", gps.altitude.meters());
+    display.printf("Spd: %.1f km/h\n", gps.speed.kmph());
+  }
+  else
+  {
+    display.println("等待定位...");
+  }
+  if (tripActive)
+  {
+    display.setTextSize(1);
+    display.setCursor(0, 48);
+    display.print("码表: 进行中");
+  }
+  else
+  {
+    display.setTextSize(1);
+    display.setCursor(0, 48);
+    display.print("码表: 未开始");
+  }
+  display.display();
+}
+#endif
+#ifdef USE_ST7735_SCREEN
+void updateSt7735()
+{
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(1);
+  tft.setCursor(0, 0);
+  tft.println("GPS 码表");
+  if (gps.location.isValid())
+  {
+    tft.printf("Lat: %.6f\n", gps.location.lat());
+    tft.printf("Lng: %.6f\n", gps.location.lng());
+    tft.printf("Alt: %.1f m\n", gps.altitude.meters());
+    tft.printf("Spd: %.1f km/h\n", gps.speed.kmph());
+  }
+  else
+  {
+    tft.println("等待定位...");
+  }
+  if (tripActive)
+  {
+    tft.setCursor(0, 48);
+    tft.print("码表: 进行中");
+  }
+  else
+  {
+    tft.setCursor(0, 48);
+    tft.print("码表: 未开始");
+  }
+}
+#endif
+
 void setup() {
   Serial.begin(115200);
   Serial.println("Booting...");
@@ -269,6 +355,25 @@ void setup() {
     Serial.println("Connecting to WiFi...");
   }
   Serial.println("Connected to WiFi");
+
+#ifdef USE_OLED_SCREEN
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("Booting...");
+  display.display();
+#endif
+#ifdef USE_ST7735_SCREEN
+  tft.initR(INITR_BLACKTAB);
+  tft.setRotation(1);
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(1);
+  tft.setCursor(0, 0);
+  tft.println("Booting...");
+#endif
 
   server.on("/", handleRoot);
   server.on("/data", handleData);
@@ -317,6 +422,12 @@ void loop() {
     }
   }
 
+#ifdef USE_OLED_SCREEN
+  updateOled();
+#endif
+#ifdef USE_ST7735_SCREEN
+  updateSt7735();
+#endif
   server.handleClient();
   delay(10); // 避免看门狗复位
 }
