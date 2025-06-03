@@ -90,6 +90,10 @@ String gpsDataHtml() {
     button { background: #2a5d9f; color: #fff; border: none; border-radius: 5px; padding: 10px 22px; font-size: 1em; cursor: pointer; transition: background 0.2s; }
     button:hover { background: #17406b; }
     .status { margin: 10px 0 0 0; color: #888; font-size: 0.98em; }
+    .download-list { margin-top: 32px; }
+    .download-list ul { padding-left: 20px; }
+    .download-list a { color: #2a5d9f; text-decoration: none; }
+    .download-list a:hover { text-decoration: underline; }
   </style>
   <script>
     function fetchData() {
@@ -108,6 +112,24 @@ String gpsDataHtml() {
   html += "<form method='POST' action='/stop' style='display:inline;'><button type='submit'>结束码表</button></form>";
   html += "</div>";
   html += "<div class='status'>页面每2秒自动刷新</div>";
+
+  // 码表下载列表直接显示在主页面
+  html += "<div class='download-list'><h2>码表数据下载</h2><ul>";
+  Dir dir = LittleFS.openDir("/");
+  bool found = false;
+  while (dir.next())
+  {
+    String fn = dir.fileName();
+    if (fn.startsWith("/trip_") && fn.endsWith(".csv"))
+    {
+      html += "<li><a href='/download?file=" + fn + "'>" + fn + "</a></li>";
+      found = true;
+    }
+  }
+  if (!found)
+    html += "<li>暂无码表数据</li>";
+  html += "</ul></div>";
+
   html += "</div></body></html>";
   return html;
 }
@@ -326,27 +348,8 @@ void updateSt7735()
 
 void handleDownloads()
 {
-  // 直接返回主页面，嵌入下载列表
-  String html = gpsDataHtml();
-  // 插入下载列表到主页面底部
-  String list = "<div class='container'><h2>码表数据下载</h2><ul>";
-  Dir dir = LittleFS.openDir("/");
-  bool found = false;
-  while (dir.next())
-  {
-    String fn = dir.fileName();
-    if (fn.startsWith("/trip_") && fn.endsWith(".csv"))
-    {
-      list += "<li><a href='/download?file=" + fn + "'>" + fn + "</a></li>";
-      found = true;
-    }
-  }
-  if (!found)
-    list += "<li>暂无码表数据</li>";
-  list += "</ul></div></body></html>";
-  // 替换主页面结尾
-  html.replace("</body></html>", list);
-  server.send(200, "text/html", html);
+  // 兼容旧路由，直接返回主页面
+  handleRoot();
 }
 
 void handleDownloadFile()
