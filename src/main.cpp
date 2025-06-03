@@ -159,6 +159,8 @@ void handleStartTrip()
       addLog("[ERROR] Failed to create trip file");
     }
   }
+  // 直接返回主页面，不跳转
+  handleRoot();
 }
 
 void handleStopTrip()
@@ -322,6 +324,65 @@ void updateSt7735()
 }
 #endif
 
+void handleDownloads()
+{
+  // 直接返回主页面，嵌入下载列表
+  String html = gpsDataHtml();
+  // 插入下载列表到主页面底部
+  String list = "<div class='container'><h2>码表数据下载</h2><ul>";
+  Dir dir = LittleFS.openDir("/");
+  bool found = false;
+  while (dir.next())
+  {
+    String fn = dir.fileName();
+    if (fn.startsWith("/trip_") && fn.endsWith(".csv"))
+    {
+      list += "<li><a href='/download?file=" + fn + "'>" + fn + "</a></li>";
+      found = true;
+    }
+  }
+  if (!found)
+    list += "<li>暂无码表数据</li>";
+  list += "</ul></div></body></html>";
+  // 替换主页面结尾
+  html.replace("</body></html>", list);
+  server.send(200, "text/html", html);
+}
+
+void handleDownloadFile()
+{
+  if (!server.hasArg("file"))
+  {
+    server.send(400, "text/plain", "Missing file param");
+    return;
+  }
+  String fn = server.arg("file");
+  if (!fn.startsWith("/trip_") || !fn.endsWith(".csv"))
+  {
+    server.send(403, "text/plain", "Forbidden");
+    return;
+  }
+  File f = LittleFS.open(fn, "r");
+  if (!f)
+  {
+    server.send(404, "text/plain", "File not found");
+    return;
+  }
+  server.streamFile(f, "text/csv");
+  f.close();
+}
+
+// --- 函数声明，解决 undefined 报错 ---
+void tryLoadWifiConfig();
+void handleWifiConfig();
+void handleWifiSave();
+void writePositionToFS(double lat, double lng, double alt, double speed);
+void writeTripData(double lat, double lng, double alt, double speed);
+void handleStartTrip();
+void handleStopTrip();
+void handleDownloads();
+void handleDownloadFile();
+
 void setup() {
   Serial.begin(115200);
   Serial.println("Booting...");
@@ -390,10 +451,12 @@ void setup() {
   tft.println("Booting...");
 #endif
 
-  server.on("/", handleRoot);
+  server.on("/", HTTP_GET, handleRoot);
   server.on("/data", handleData);
   server.on("/start", HTTP_POST, handleStartTrip);
   server.on("/stop", HTTP_POST, handleStopTrip);
+  server.on("/downloads", handleDownloads);
+  server.on("/download", handleDownloadFile);
   server.begin();
   Serial.println("HTTP server started");
 }
@@ -434,6 +497,20 @@ void loop() {
       // 写入LittleFS
       writePositionToFS(gps.location.lat(), gps.location.lng(), gps.altitude.meters(), gps.speed.kmph());
       writeTripData(gps.location.lat(), gps.location.lng(), gps.altitude.meters(), gps.speed.kmph());
+    }
+  }
+
+  static unsigned long lastTripWrite = 0;
+  if (tripActive)
+  {
+    if (millis() - lastTripWrite > 1000)
+    {
+      lastTripWrite = millis();
+      double lat = gps.location.isValid() ? gps.location.lat() : 0.0;
+      double lng = gps.location.isValid() ? gps.location.lng() : 0.0;
+      double alt = gps.location.isValid() ? gps.altitude.meters() : 0.0;
+      double spd = gps.location.isValid() ? gps.speed.kmph() : 0.0;
+      writeTripData(lat, lng, alt, spd);
     }
   }
 
