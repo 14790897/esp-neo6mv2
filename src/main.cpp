@@ -5,6 +5,7 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <LittleFS.h>
+#include <DNSServer.h>
 #ifdef USE_OLED_SCREEN
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -45,9 +46,9 @@ unsigned long tripEndTime = 0;
 String tripFileName = "";
 
 // WiFi 配置相关变量
-#ifdef ssid
-const char *wifiSsid = ssid;
-const char *wifiPass = password;
+#ifdef wifi_ssid
+const char *wifiSsid = wifi_ssid;
+const char *wifiPass = wifi_password;
 bool wifiConfigured = true;
 #else
 String wifiSsid = "";
@@ -62,6 +63,18 @@ void addLog(const String &msg) {
     logBuffer = logBuffer.substring(logBuffer.length() - 3000);
   }
 }
+
+void saveWifiConfig()
+{
+  File f = LittleFS.open("/wifi.txt", "w");
+  if (f)
+  {
+    f.println(wifiSsid);
+    f.println(wifiPass);
+    f.close();
+  }
+}
+
 
 String gpsDataHtml() {
   String html = "<html><head><meta charset='utf-8'><title>GPS Data</title>";
@@ -218,6 +231,7 @@ void handleWifiSave()
   if (server.hasArg("pass"))
     wifiPass = server.arg("pass");
   wifiConfigured = true;
+  saveWifiConfig(); // 保存WiFi配置到LittleFS
   String html = "<html><meta charset='utf-8'><body><h2>WiFi配置已保存，正在重启...</h2></body></html>";
   server.send(200, "text/html", html);
   delay(1000);
@@ -240,16 +254,6 @@ void tryLoadWifiConfig()
 #endif
 }
 
-void saveWifiConfig()
-{
-  File f = LittleFS.open("/wifi.txt", "w");
-  if (f)
-  {
-    f.println(wifiSsid);
-    f.println(wifiPass);
-    f.close();
-  }
-}
 
 #ifdef USE_OLED_SCREEN
 void updateOled()
@@ -332,16 +336,27 @@ void setup() {
   gpsSerial.begin(9600);
   WiFi.begin(wifiSsid, wifiPass);
 #else
+  DNSServer dnsServer;
   if (!wifiConfigured)
   {
     WiFi.mode(WIFI_AP);
-    WiFi.softAP("GPS-Config", "12345678");
+    WiFi.softAP("GPS-Config"); // 无密码
+    WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
+    dnsServer.start(53, "*", IPAddress(192, 168, 4, 1));
     server.on("/", handleWifiConfig);
     server.on("/wifi_save", HTTP_POST, handleWifiSave);
+    // Captive Portal兼容：重定向常见探测路径
+    server.on("/generate_204", handleWifiConfig);        // Android
+    server.on("/fwlink", handleWifiConfig);              // Windows
+    server.on("/ncsi.txt", handleWifiConfig);            // Windows
+    server.on("/hotspot-detect.html", handleWifiConfig); // iOS/macOS
+    server.onNotFound(handleWifiConfig);                 // 其它所有路径
     server.begin();
     Serial.println("WiFi config AP started");
+    Serial.println("请在浏览器访问 http://192.168.4.1 进行WiFi配置");
     while (true)
     {
+      dnsServer.processNextRequest();
       server.handleClient();
       delay(10);
     }
