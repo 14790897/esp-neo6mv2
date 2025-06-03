@@ -286,7 +286,7 @@ void updateOled()
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.println("GPS 码表");
+  display.println("GPS trip");
   display.setTextSize(1);
   if (gps.location.isValid())
   {
@@ -297,19 +297,19 @@ void updateOled()
   }
   else
   {
-    display.println("等待定位...");
+    display.println("wait...");
   }
   if (tripActive)
   {
     display.setTextSize(1);
     display.setCursor(0, 48);
-    display.print("码表: 进行中");
+    display.print("active");
   }
   else
   {
     display.setTextSize(1);
     display.setCursor(0, 48);
-    display.print("码表: 未开始");
+    display.print("sleep");
   }
   display.display();
 }

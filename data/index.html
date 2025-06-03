@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPS 智能码表</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛰️</text></svg>">
+</head>
+<body>
+    <div class="container">
+        <!-- 页面头部 -->
+        <div class="header">
+            <h1>🛰️ GPS 智能码表</h1>
+            <div class="subtitle">
+                <span class="status-indicator status-online" id="statusIndicator"></span>
+                实时定位追踪系统
+            </div>
+        </div>
+        
+        <!-- 主要内容区域 -->
+        <div id="main">
+            <div class="card">
+                <div class="card-title">正在加载GPS数据...</div>
+                <div class="loading-container">
+                    <div class="loading-spinner">🔄</div>
+                    <div class="loading-text">请稍候，正在获取最新数据</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 控制按钮 -->
+        <div class="btn-row">
+            <form method="POST" action="/start" style="display:inline;">
+                <button type="submit" class="btn btn-start">🚀 开始码表</button>
+            </form>
+            <form method="POST" action="/stop" style="display:inline;">
+                <button type="submit" class="btn btn-stop">⏹️ 结束码表</button>
+            </form>
+        </div>
+        
+        <!-- 状态栏 -->
+        <div class="status-bar">
+            📡 页面每2秒自动刷新 | 实时数据同步
+        </div>
+
+        <!-- 码表下载列表 -->
+        <div class="card download-section">
+            <div class="card-title">码表数据下载</div>
+            <div id="downloadList">
+                <div class="loading-container">
+                    <div class="loading-text">正在加载下载列表...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/script.js"></script>
+</body>
+</html>
