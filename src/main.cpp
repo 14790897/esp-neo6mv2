@@ -9,6 +9,9 @@
 #ifdef USE_OLED_SCREEN
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Wire.h>
+#define OLED_SCL 12 // D6
+#define OLED_SDA 13 // D7
 #endif
 #ifdef USE_ST7735_SCREEN
 #include <Adafruit_GFX.h>
@@ -250,6 +253,10 @@ void handleWifiConfig()
 
 void handleWifiSave()
 {
+#ifdef wifi_ssid
+  // 宏模式下不允许网页配置WiFi
+  server.send(403, "text/plain", "WiFi is hardcoded in firmware");
+#else
   if (server.hasArg("ssid"))
     wifiSsid = server.arg("ssid");
   if (server.hasArg("pass"))
@@ -260,11 +267,12 @@ void handleWifiSave()
   server.send(200, "text/html", html);
   delay(1000);
   ESP.restart();
+#endif
 }
 
 void tryLoadWifiConfig()
 {
-#ifndef ssid
+#ifndef wifi_ssid
   File f = LittleFS.open("/wifi.txt", "r");
   if (f)
   {
@@ -395,8 +403,7 @@ void setup() {
     addLog("[ERROR] LittleFS mount failed");
   }
   tryLoadWifiConfig();
-#ifdef ssid
-  // secrets.h已定义，直接连接
+#ifdef wifi_ssid
   gpsSerial.begin(9600);
   WiFi.begin(wifiSsid, wifiPass);
 #else
@@ -436,6 +443,7 @@ void setup() {
   Serial.println("Connected to WiFi");
 
 #ifdef USE_OLED_SCREEN
+  Wire.begin(OLED_SDA, OLED_SCL); // 指定SDA和SCL引脚，13为SDA，12为SCL
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
