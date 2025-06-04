@@ -177,13 +177,13 @@ void handleStartTrip()
     {
       addLog("[ERROR] Failed to create trip file");
     }
+    server.send(200, "text/plain", "Trip started");
   }
   else
   {
     addLog("[DEBUG] handleStartTrip() called but tripActive already true");
+    server.send(200, "text/plain", "Trip already started");
   }
-  server.sendHeader("Location", "/", true);
-  server.send(302, "text/plain", "");
 }
 
 void handleStopTrip()
@@ -193,10 +193,12 @@ void handleStopTrip()
     tripActive = false;
     tripEndTime = millis();
     addLog("[TRIP] Trip ended: " + tripFileName);
+    server.send(200, "text/plain", "Trip stopped");
   }
-  // 补充：结束后也应重定向主页，保持和 /start 一致
-  server.sendHeader("Location", "/", true);
-  server.send(302, "text/plain", "");
+  else
+  {
+    server.send(200, "text/plain", "Trip not active");
+  }
 }
 
 void writePositionToFS(double lat, double lng, double alt, double speed)
@@ -649,7 +651,7 @@ void loop() {
     else
     {
       wifiLostTime = 0;
-      apModeActive = false
+      apModeActive = false;
     }
   }
 
