@@ -8,10 +8,10 @@ print("====================================")
 
 Import("env")
 
-env.Replace(MONITOR_DTR=0, MONITOR_RTS=0)
-# 设置串口监视器参数，确保上传后自动复位（适用于ESP8266/ESP32等）
-env['MONITOR_DTR'] = 0
-env['MONITOR_RTS'] = 0
+# env.Replace(MONITOR_DTR=0, MONITOR_RTS=0)
+# # 设置串口监视器参数，确保上传后自动复位（适用于ESP8266/ESP32等）
+# env['MONITOR_DTR'] = 0
+# env['MONITOR_RTS'] = 0
 
 # PlatformIO会读取platformio.ini中的monitor_dtr/monitor_rts参数，
 # 但此处强制设置也可确保脚本生效。

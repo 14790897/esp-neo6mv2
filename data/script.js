@@ -30,14 +30,18 @@ class GPSTracker {
     
     async fetchData() {
         try {
-            const response = await fetch('/data');
-            if (!response.ok) throw new Error('Network response was not ok');
-            
-            const html = await response.text();
-            this.mainContent.innerHTML = html;
-            this.setOnlineStatus(true);
-            this.lastUpdateTime = Date.now();
-            
+          const response = await fetch("/data");
+          if (!response.ok) throw new Error("Network response was not ok");
+
+          const html = await response.text();
+          this.mainContent.innerHTML = html;
+          // 自动滚动日志到底部
+          const logBox = this.mainContent.querySelector(".log-box");
+          if (logBox) {
+            logBox.scrollTop = logBox.scrollHeight;
+          }
+          this.setOnlineStatus(true);
+          this.lastUpdateTime = Date.now();
         } catch (error) {
             console.error('Failed to fetch GPS data:', error);
             this.setOnlineStatus(false);

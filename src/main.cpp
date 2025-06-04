@@ -1,17 +1,18 @@
 #include <Arduino.h>
 #include <secrets.h>
-#include <SoftwareSerial.h>
+// #include <SoftwareSerial.h>
 #include <TinyGPS++.h> //TinyGPSPlus.h不行，而TinyGPS++.h可以
-#include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
+#include <WiFi.h>
+#include <WebServer.h>
 #include <LittleFS.h>
 #include <DNSServer.h>
+#include <ESPmDNS.h>
 #ifdef USE_OLED_SCREEN
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <Wire.h>
-#define OLED_SCL 12 // D6
-#define OLED_SDA 13 // D7
+#define OLED_SCL 5
+#define OLED_SDA 4
 #endif
 #ifdef USE_ST7735_SCREEN
 #include <Adafruit_GFX.h>
@@ -23,14 +24,17 @@
 Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_RST);
 #endif
 
-// 定义 GPS 模块的 RX 和 TX 引脚
-#define RX_PIN 4   // D2 (GPIO4)
-#define TX_PIN 5   // D1 (GPIO5)
+// 定义 GPS 模块的 RX 和 TX 引脚（硬件串口）
+#define RX_PIN 0
+#define TX_PIN 1
 
 // 创建 SoftwareSerial 和 TinyGPSPlus 对象
-SoftwareSerial gpsSerial(RX_PIN, TX_PIN);
+// SoftwareSerial gpsSerial(RX_PIN, TX_PIN);
+// 定义为第个硬件串口
+HardwareSerial gpsSerial(1); // 使用硬件串口1
+
 TinyGPSPlus gps;
-ESP8266WebServer server(80);
+WebServer server(80);
 
 #ifdef USE_OLED_SCREEN
 #define SCREEN_WIDTH 128
@@ -78,65 +82,6 @@ void saveWifiConfig()
   }
 }
 
-
-String gpsDataHtml() {
-  String html = "<html><head><meta charset='utf-8'><title>GPS Data</title>";
-  html += R"(
-  <style>
-    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6fa; margin: 0; padding: 0; }
-    .container { max-width: 600px; margin: 30px auto; background: #fff; border-radius: 10px; box-shadow: 0 2px 8px #0001; padding: 24px; }
-    h2 { color: #2a5d9f; margin-top: 0; }
-    .gps-data p { margin: 6px 0; font-size: 1.1em; }
-    .log-title { margin: 18px 0 6px 0; color: #444; font-size: 1.1em; }
-    .log-box { font-family:monospace; white-space:pre-wrap; border:1px solid #ccc; padding:8px; height:200px; overflow:auto; background:#f9f9f9; border-radius: 6px; }
-    .btn-row { display: flex; gap: 12px; margin: 18px 0 0 0; }
-    button { background: #2a5d9f; color: #fff; border: none; border-radius: 5px; padding: 10px 22px; font-size: 1em; cursor: pointer; transition: background 0.2s; }
-    button:hover { background: #17406b; }
-    .status { margin: 10px 0 0 0; color: #888; font-size: 0.98em; }
-    .download-list { margin-top: 32px; }
-    .download-list ul { padding-left: 20px; }
-    .download-list a { color: #2a5d9f; text-decoration: none; }
-    .download-list a:hover { text-decoration: underline; }
-  </style>
-  <script>
-    function fetchData() {
-      fetch('/data').then(r=>r.text()).then(html=>{
-        document.getElementById('main').innerHTML = html;
-      });
-    }
-    setInterval(fetchData, 2000);
-    window.onload = fetchData;
-  </script>
-  )";
-  html += "</head><body><div class='container'>";
-  html += "<div id='main'>加载中...</div>";
-  html += "<div class='btn-row'>";
-  html += "<form method='POST' action='/start' style='display:inline;'><button type='submit'>开始码表</button></form>";
-  html += "<form method='POST' action='/stop' style='display:inline;'><button type='submit'>结束码表</button></form>";
-  html += "</div>";
-  html += "<div class='status'>页面每2秒自动刷新</div>";
-
-  // 码表下载列表直接显示在主页面
-  html += "<div class='download-list'><h2>码表数据下载</h2><ul>";
-  Dir dir = LittleFS.openDir("/");
-  bool found = false;
-  while (dir.next())
-  {
-    String fn = dir.fileName();
-    if (fn.startsWith("/trip_") && fn.endsWith(".csv"))
-    {
-      html += "<li><a href='/download?file=" + fn + "'>" + fn + "</a></li>";
-      found = true;
-    }
-  }
-  if (!found)
-    html += "<li>暂无码表数据</li>";
-  html += "</ul></div>";
-
-  html += "</div></body></html>";
-  return html;
-}
-
 String gpsDataInnerHtml()
 {
   String html = "<div class='gps-data'>";
@@ -156,7 +101,47 @@ String gpsDataInnerHtml()
 }
 
 void handleRoot() {
-  server.send(200, "text/html", gpsDataHtml());
+  File f = LittleFS.open("/index.html", "r");
+  if (f)
+  {
+    String html = f.readString();
+    server.send(200, "text/html", html);
+    f.close();
+  }
+  else
+  {
+    server.send(500, "text/plain", "index.html not found in LittleFS");
+  }
+}
+
+void handleStyle()
+{
+  File f = LittleFS.open("/style.css", "r");
+  if (f)
+  {
+    String css = f.readString();
+    server.send(200, "text/css", css);
+    f.close();
+  }
+  else
+  {
+    server.send(404, "text/plain", "style.css not found");
+  }
+}
+
+void handleScript()
+{
+  File f = LittleFS.open("/script.js", "r");
+  if (f)
+  {
+    String js = f.readString();
+    server.send(200, "application/javascript", js);
+    f.close();
+  }
+  else
+  {
+    server.send(404, "text/plain", "script.js not found");
+  }
 }
 
 void handleData()
@@ -166,11 +151,16 @@ void handleData()
 
 void handleStartTrip()
 {
+  addLog("[DEBUG] handleStartTrip() called");
   if (!tripActive)
   {
     tripActive = true;
     tripStartTime = millis();
-    tripFileName = "/trip_" + String(tripStartTime) + ".csv";
+    time_t now = time(nullptr);
+    struct tm *tm_info = localtime(&now);
+    char buf[32];
+    strftime(buf, sizeof(buf), "/trip_%Y%m%d_%H%M%S.csv", tm_info);
+    tripFileName = String(buf);
     File f = LittleFS.open(tripFileName, "w");
     if (f)
     {
@@ -184,8 +174,12 @@ void handleStartTrip()
       addLog("[ERROR] Failed to create trip file");
     }
   }
-  // 直接返回主页面，不跳转
-  handleRoot();
+  else
+  {
+    addLog("[DEBUG] handleStartTrip() called but tripActive already true");
+  }
+  server.sendHeader("Location", "/", true);
+  server.send(302, "text/plain", "");
 }
 
 void handleStopTrip()
@@ -196,6 +190,9 @@ void handleStopTrip()
     tripEndTime = millis();
     addLog("[TRIP] Trip ended: " + tripFileName);
   }
+  // 补充：结束后也应重定向主页，保持和 /start 一致
+  server.sendHeader("Location", "/", true);
+  server.send(302, "text/plain", "");
 }
 
 void writePositionToFS(double lat, double lng, double alt, double speed)
@@ -219,7 +216,18 @@ void writeTripData(double lat, double lng, double alt, double speed)
     File f = LittleFS.open(tripFileName, "a");
     if (f)
     {
-      f.printf("%lu,%.6f,%.6f,%.2f,%.2f\n", millis(), lat, lng, alt, speed);
+      if (gps.location.isValid())
+      {
+        f.printf("%lu,%.6f,%.6f,%.2f,%.2f\n", millis(), lat, lng, alt, speed);
+        addLog("[TRIP] Data written to " + tripFileName + ": " +
+               String(lat, 6) + ", " + String(lng, 6) + ", " +
+               String(alt, 2) + " m, " + String(speed, 2) + " km/h");
+      }
+      else
+      {
+        f.printf("%lu,,,,\n", millis()); // 只写时间，其他为空
+        addLog("[TRIP] Invalid GPS data, only timestamp written to " + tripFileName);
+      }
       f.close();
     }
   }
@@ -305,7 +313,7 @@ void updateOled()
   }
   else
   {
-    display.println("wait...");
+    display.println("wait for signal");
   }
   if (tripActive)
   {
@@ -356,8 +364,35 @@ void updateSt7735()
 
 void handleDownloads()
 {
-  // 兼容旧路由，直接返回主页面
-  handleRoot();
+  String html = "<div class='download-list'>";
+  std::vector<String> files;
+  File root = LittleFS.open("/", "r");
+  if (root)
+  {
+    File file = root.openNextFile();
+    while (file)
+    {
+      String name = file.name();
+      if (!file.isDirectory())
+      {
+        files.push_back(name);
+      }
+      file = root.openNextFile();
+    }
+    root.close();
+  }
+  // 按文件名倒序排列（最新在前）
+  std::sort(files.begin(), files.end(), std::greater<String>());
+  for (const auto &name : files)
+  {
+    html += "<a href=\"/download?file=" + name + "\" download>" + name.substring(1) + "</a><br>";
+  }
+  if (files.empty())
+  {
+    html += "<div class='no-data'>暂无码表数据</div>";
+  }
+  html += "</div>";
+  server.send(200, "text/html", html);
 }
 
 void handleDownloadFile()
@@ -368,6 +403,11 @@ void handleDownloadFile()
     return;
   }
   String fn = server.arg("file");
+  // 兼容前端传递的文件名没有前导斜杠的情况
+  if (!fn.startsWith("/"))
+  {
+    fn = "/" + fn;
+  }
   if (!fn.startsWith("/trip_") || !fn.endsWith(".csv"))
   {
     server.send(403, "text/plain", "Forbidden");
@@ -381,6 +421,26 @@ void handleDownloadFile()
   }
   server.streamFile(f, "text/csv");
   f.close();
+}
+
+void listLittleFSFiles()
+{
+  Serial.println("LittleFS 文件列表:");
+  File root = LittleFS.open("/", "r");
+  if (root)
+  {
+    File file = root.openNextFile();
+    while (file)
+    {
+      Serial.printf("  %s (%d bytes)\n", file.name(), file.size());
+      file = root.openNextFile();
+    }
+    root.close();
+  }
+  else
+  {
+    Serial.println("无法打开 LittleFS 根目录");
+  }
 }
 
 // --- 函数声明，解决 undefined 报错 ---
@@ -397,6 +457,8 @@ void handleDownloadFile();
 void setup() {
   Serial.begin(115200);
   Serial.println("Booting...");
+  gpsSerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+  Serial.printf("[INFO] GPS UART1 started: RX=%d, TX=%d, baud=9600\n", RX_PIN, TX_PIN);
   if (!LittleFS.begin())
   {
     Serial.println("LittleFS mount failed");
@@ -404,7 +466,6 @@ void setup() {
   }
   tryLoadWifiConfig();
 #ifdef wifi_ssid
-  gpsSerial.begin(9600);
   WiFi.begin(wifiSsid, wifiPass);
 #else
   DNSServer dnsServer;
@@ -432,7 +493,6 @@ void setup() {
       delay(10);
     }
   }
-  gpsSerial.begin(9600);
   WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
 #endif
   // 等待 Wi-Fi 连接成功
@@ -441,6 +501,18 @@ void setup() {
     Serial.println("Connecting to WiFi...");
   }
   Serial.println("Connected to WiFi");
+
+  // --- mDNS ---
+  if (MDNS.begin("esp32gps"))
+  {
+    Serial.println("mDNS responder started: http://esp32gps.local/");
+    addLog("[INFO] mDNS started: http://esp32gps.local/");
+  }
+  else
+  {
+    Serial.println("Error setting up mDNS responder!");
+    addLog("[ERROR] mDNS failed");
+  }
 
 #ifdef USE_OLED_SCREEN
   Wire.begin(OLED_SDA, OLED_SCL); // 指定SDA和SCL引脚，13为SDA，12为SCL
@@ -463,13 +535,20 @@ void setup() {
 #endif
 
   server.on("/", HTTP_GET, handleRoot);
+  server.on("/index.html", HTTP_GET, handleRoot);
+  server.on("/style.css", HTTP_GET, handleStyle);
+  server.on("/script.js", HTTP_GET, handleScript);
   server.on("/data", handleData);
   server.on("/start", HTTP_POST, handleStartTrip);
+  server.on("/start", HTTP_GET, handleStartTrip); // 新增这一行
   server.on("/stop", HTTP_POST, handleStopTrip);
+  server.on("/stop", HTTP_GET, handleStopTrip); // 新增这一行
   server.on("/downloads", handleDownloads);
   server.on("/download", handleDownloadFile);
   server.begin();
   Serial.println("HTTP server started");
+  listLittleFSFiles(); // 启动后串口输出所有文件列表
+  configTime(8 * 3600, 0, "ntp.aliyun.com", "ntp1.aliyun.com", "pool.ntp.org");
 }
 
 void loop() {
