@@ -63,6 +63,10 @@ String wifiPass = "";
 bool wifiConfigured = false;
 #endif
 
+// 新增：WiFi掉线AP切换相关变量
+unsigned long wifiLostTime = 0;
+bool apModeActive = false;
+
 void addLog(const String &msg) {
   logBuffer += msg + "<br>";
   // 限制日志长度，避免内存溢出
@@ -551,6 +555,32 @@ void setup() {
   configTime(8 * 3600, 0, "ntp.aliyun.com", "ntp1.aliyun.com", "pool.ntp.org");
 }
 
+void enterApMode()
+{
+  if (apModeActive)
+    return;
+  apModeActive = true;
+  WiFi.disconnect();
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP("GPS-AP-Data");
+  IPAddress apIP(192, 168, 4, 1);
+  WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+  server.close();
+  server.stop();
+  delay(100);
+  // 重新设置路由并启动server
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/index.html", HTTP_GET, handleRoot);
+  server.on("/style.css", HTTP_GET, handleStyle);
+  server.on("/script.js", HTTP_GET, handleScript);
+  server.on("/data", handleData);
+  server.on("/downloads", handleDownloads);
+  server.on("/download", handleDownloadFile);
+  server.begin();
+  Serial.println("[AP MODE] Started AP for data access: SSID=GPS-AP-Data");
+  addLog("[AP MODE] Started AP for data access: SSID=GPS-AP-Data");
+}
+
 void loop() {
   // 每2秒输出一次调试日志，表明主循环正常运行
   static unsigned long lastDebug = 0;
@@ -601,6 +631,25 @@ void loop() {
       double alt = gps.location.isValid() ? gps.altitude.meters() : 0.0;
       double spd = gps.location.isValid() ? gps.speed.kmph() : 0.0;
       writeTripData(lat, lng, alt, spd);
+    }
+  }
+
+  // 新增：WiFi掉线检测与AP切换
+  if (!apModeActive)
+  {
+    if (WiFi.status() != WL_CONNECTED)
+    {
+      if (wifiLostTime == 0)
+        wifiLostTime = millis();
+      else if (millis() - wifiLostTime > 30000)
+      { // 30秒无网
+        enterApMode();
+      }
+    }
+    else
+    {
+      wifiLostTime = 0;
+      apModeActive = false
     }
   }
 
