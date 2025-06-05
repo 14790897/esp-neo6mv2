@@ -73,6 +73,7 @@ void addLog(const String &msg) {
   if (logBuffer.length() > 3000) {
     logBuffer = logBuffer.substring(logBuffer.length() - 3000);
   }
+  Serial.println(msg);
 }
 
 void saveWifiConfig()
@@ -413,11 +414,6 @@ void handleDownloadFile()
   if (!fn.startsWith("/"))
   {
     fn = "/" + fn;
-  }
-  if (!fn.startsWith("/trip_") || !fn.endsWith(".csv"))
-  {
-    server.send(403, "text/plain", "Forbidden");
-    return;
   }
   File f = LittleFS.open(fn, "r");
   if (!f)

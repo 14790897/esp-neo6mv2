@@ -1,7 +1,7 @@
-# ESP8266 GPS 码表项目
+# ESP32-C3 GPS 码表项目
 
 ## 项目简介
-本项目基于 ESP8266（如 ESP-12E）+ NEO-6M GPS 模块，实现了：
+本项目基于 ESP32-C3（如 airm2m_core_esp32c3）+ NEO-6M GPS 模块，实现了：
 - 实时网页显示 GPS 数据和串口日志
 - 码表功能（网页控制开始/结束，数据以 CSV 格式保存）
 - LittleFS 持久化存储
@@ -9,6 +9,22 @@
 - 支持 OLED（SSD1306）和 ST7735 两种屏幕，编译时可选
 - AP 模式下支持 Captive Portal（DNS 劫持自动弹出 WiFi 配置页）
 - 码表数据网页直接下载
+
+## 实拍图片
+
+项目硬件实物展示：
+
+![硬件实拍图1](IMG_20250604_175034.jpg)
+*ESP32-C3 + NEO-6M GPS 模块整体布局*
+
+![硬件实拍图2](IMG_20250604_175037.jpg)
+*GPS 模块和显示屏连接细节*
+
+![硬件实拍图3](IMG_20250604_175041.jpg)
+*完整硬件组装效果*
+
+![硬件实拍图4](IMG_20250604_175043.jpg)
+*系统运行状态展示*
 
 ## 主要功能
 - 通过网页实时查看 GPS 信息、串口日志
@@ -20,8 +36,8 @@
 
 ## 使用说明
 1. **硬件连接**
-   - ESP8266（如 ESP-12E）
-   - NEO-6M GPS 模块（默认 RX=D2, TX=D1）
+   - ESP32-C3（如 airm2m_core_esp32c3）
+   - NEO-6M GPS 模块（默认 RX=0, TX=1）
    - 可选 OLED（SSD1306）或 ST7735 彩屏
 
 2. **编译配置**
@@ -46,9 +62,9 @@
    - 码表数据标准 CSV 格式，便于后续分析
 
 ## 依赖库
-- ESP8266WiFi
-- ESP8266WebServer
-- ESP8266HTTPClient
+- WiFi
+- WebServer
+- HTTPClient
 - mikalhart/TinyGPSPlus
 - LittleFS
 - Adafruit SSD1306
