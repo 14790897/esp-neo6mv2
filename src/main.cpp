@@ -35,6 +35,7 @@ HardwareSerial gpsSerial(1); // 使用硬件串口1
 
 TinyGPSPlus gps;
 WebServer server(80);
+DNSServer dnsServer; // 用于Captive Portal
 
 #ifdef USE_OLED_SCREEN
 #define SCREEN_WIDTH 128
@@ -66,6 +67,10 @@ bool wifiConfigured = false;
 // 新增：WiFi掉线AP切换相关变量
 unsigned long wifiLostTime = 0;
 bool apModeActive = false;
+bool configModeActive = false;                   // 配置模式标志
+bool wifiRetrying = false;                       // WiFi重连状态标志
+unsigned long lastWifiRetryTime = 0;             // 上次尝试重连WiFi的时间
+const unsigned long WIFI_RETRY_INTERVAL = 60000; // 每60秒尝试重连一次WiFi
 
 // GPS数据超时检测变量
 unsigned long lastGpsUpdateTime = 0;
@@ -329,23 +334,63 @@ void updateOled()
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.println("GPS trip");
-  display.setTextSize(1);
+  display.setCursor(0, 0); // 显示WiFi状态
+  if (apModeActive)
+  {
+    if (wifiRetrying)
+    {
+      display.println("AP: Reconnecting...");
+    }
+    else
+    {
+      display.println("AP: GPS-AP-Data");
+    }
+    display.println("Visit: 192.168.4.1");
+  }
+  else if (configModeActive)
+  {
+    display.println("Config Mode");
+    display.println("Visit: 192.168.4.1");
+  }
+  else if (WiFi.status() == WL_CONNECTED)
+  {
+    display.printf("WiFi: %s\n", WiFi.localIP().toString().c_str());
+    display.println("Visit: esp32gps.local");
+  }
+  else
+  {
+    if (wifiLostTime > 0)
+    {
+      unsigned long disconnectTime = (millis() - wifiLostTime) / 1000;
+      display.printf("WiFi lost: %lus\n", disconnectTime);
+    }
+    else
+    {
+      display.println("WiFi: Connecting...");
+    }
+  }
 
   // 检查GPS数据是否超时
   unsigned long currentTime = millis();
   bool gpsTimeout = (lastGpsUpdateTime > 0) && (currentTime - lastGpsUpdateTime > GPS_TIMEOUT_MS);
-
   if (gps.location.isValid() && !gpsTimeout)
   {
-    display.printf("Lat: %.6f\n", gps.location.lat());
-    display.printf("Lng: %.6f\n", gps.location.lng());
-    display.printf("Alt: %.1f m\n", gps.altitude.meters());
-    display.printf("Spd: %.1f km/h\n", gps.speed.kmph());
-    // 显示最后更新时间
-    unsigned long timeSinceUpdate = currentTime - lastGpsUpdateTime;
-    display.printf("Update: %lus ago\n", timeSinceUpdate / 1000);
+    // 第一行：简化的经纬度显示
+    display.setTextSize(1);
+    display.printf("%.4f,%.4f\n", gps.location.lat(), gps.location.lng());
+
+    // 第二行：高度
+    display.printf("Alt: %.0fm\n", gps.altitude.meters());
+
+    // 第三、四行：大字体显示速度
+    display.setTextSize(2);
+    display.setCursor(0, 32);
+    display.printf("%.1f", gps.speed.kmph());
+
+    // 在速度数字右侧显示单位（小字体）
+    display.setTextSize(1);
+    display.setCursor(80, 40);
+    display.println("km/h");
   }
   else if (gpsTimeout)
   {
@@ -381,7 +426,34 @@ void updateSt7735()
   tft.setTextColor(ST77XX_WHITE);
   tft.setTextSize(1);
   tft.setCursor(0, 0);
-  tft.println("GPS 码表");
+
+  // 显示WiFi状态
+  if (apModeActive)
+  {
+    tft.setTextColor(ST77XX_YELLOW);
+    tft.println("AP: GPS-AP-Data");
+    tft.setTextColor(ST77XX_WHITE);
+  }
+  else if (WiFi.status() == WL_CONNECTED)
+  {
+    tft.setTextColor(ST77XX_GREEN);
+    tft.printf("WiFi: %s\n", WiFi.localIP().toString().c_str());
+    tft.setTextColor(ST77XX_WHITE);
+  }
+  else
+  {
+    tft.setTextColor(ST77XX_RED);
+    if (wifiLostTime > 0)
+    {
+      unsigned long disconnectTime = (millis() - wifiLostTime) / 1000;
+      tft.printf("WiFi 断开: %lus\n", disconnectTime);
+    }
+    else
+    {
+      tft.println("WiFi: 连接中...");
+    }
+    tft.setTextColor(ST77XX_WHITE);
+  }
 
   // 检查GPS数据是否超时
   unsigned long currentTime = millis();
@@ -510,6 +582,7 @@ void handleStartTrip();
 void handleStopTrip();
 void handleDownloads();
 void handleDownloadFile();
+void enterApMode();
 
 void setup() {
   Serial.begin(115200);
@@ -522,57 +595,9 @@ void setup() {
     addLog("[ERROR] LittleFS mount failed");
   }
   tryLoadWifiConfig();
-#ifdef wifi_ssid
-  WiFi.begin(wifiSsid, wifiPass);
-#else
-  DNSServer dnsServer;
-  if (!wifiConfigured)
-  {
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP("GPS-Config"); // 无密码
-    WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
-    dnsServer.start(53, "*", IPAddress(192, 168, 4, 1));
-    server.on("/", handleWifiConfig);
-    server.on("/wifi_save", HTTP_POST, handleWifiSave);
-    // Captive Portal兼容：重定向常见探测路径
-    server.on("/generate_204", handleWifiConfig);        // Android
-    server.on("/fwlink", handleWifiConfig);              // Windows
-    server.on("/ncsi.txt", handleWifiConfig);            // Windows
-    server.on("/hotspot-detect.html", handleWifiConfig); // iOS/macOS
-    server.onNotFound(handleWifiConfig);                 // 其它所有路径
-    server.begin();
-    Serial.println("WiFi config AP started");
-    Serial.println("请在浏览器访问 http://192.168.4.1 进行WiFi配置");
-    while (true)
-    {
-      dnsServer.processNextRequest();
-      server.handleClient();
-      delay(10);
-    }
-  }
-  WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
-#endif
-  // 等待 Wi-Fi 连接成功
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.println("Connecting to WiFi...");
-  }
-  Serial.println("Connected to WiFi");
-
-  // --- mDNS ---
-  if (MDNS.begin("esp32gps"))
-  {
-    Serial.println("mDNS responder started: http://esp32gps.local/");
-    addLog("[INFO] mDNS started: http://esp32gps.local/");
-  }
-  else
-  {
-    Serial.println("Error setting up mDNS responder!");
-    addLog("[ERROR] mDNS failed");
-  }
 
 #ifdef USE_OLED_SCREEN
-  Wire.begin(OLED_SDA, OLED_SCL); // 指定SDA和SCL引脚，13为SDA，12为SCL
+  Wire.begin(OLED_SDA, OLED_SCL); // 指定SDA和SCL引脚
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
@@ -580,6 +605,7 @@ void setup() {
   display.setCursor(0, 0);
   display.println("Booting...");
   display.display();
+  delay(1000); // 显示启动信息1秒
 #endif
 #ifdef USE_ST7735_SCREEN
   tft.initR(INITR_BLACKTAB);
@@ -589,7 +615,112 @@ void setup() {
   tft.setTextSize(1);
   tft.setCursor(0, 0);
   tft.println("Booting...");
+  delay(1000);
 #endif
+
+  // 智能WiFi连接逻辑：预配置模式也支持超时进入AP
+  bool wifiConnected = false;
+  unsigned long wifiConnectStart = millis();
+  const unsigned long WIFI_CONNECT_TIMEOUT = 30000; // 30秒超时
+
+#ifdef wifi_ssid
+  WiFi.begin(wifiSsid, wifiPass);
+  Serial.printf("[INFO] Trying to connect to predefined WiFi: %s\n", wifiSsid);
+#else
+  if (!wifiConfigured)
+  {
+    // 无配置，直接进入AP配置模式，跳过WiFi连接
+    Serial.println("[INFO] No WiFi configuration, entering config mode");
+    enterConfigMode();
+    return; // 退出setup函数，不继续WiFi连接流程
+  }
+  WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
+  Serial.printf("[INFO] Trying to connect to saved WiFi: %s\n", wifiSsid.c_str());
+#endif
+  // 等待WiFi连接，但有超时限制
+  while (WiFi.status() != WL_CONNECTED && (millis() - wifiConnectStart < WIFI_CONNECT_TIMEOUT))
+  {
+    // 在等待WiFi连接时处理GPS数据
+    while (gpsSerial.available() > 0)
+    {
+      if (gps.encode(gpsSerial.read()))
+      {
+        lastGpsUpdateTime = millis();
+      }
+    }
+
+    delay(500); // 减少延迟，提高响应速度
+    Serial.println("Connecting to WiFi...");
+
+    // 在连接过程中显示GPS数据和连接状态
+#ifdef USE_OLED_SCREEN
+    display.clearDisplay();
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println("Connecting WiFi...");
+    display.printf("Time: %lu s\n", (millis() - wifiConnectStart) / 1000);
+#ifdef wifi_ssid
+    display.printf("SSID: %s\n", wifiSsid);
+#else
+    display.printf("SSID: %s\n", wifiSsid.c_str());
+#endif
+
+    // 显示GPS状态
+    if (gps.location.isValid())
+    {
+      display.printf("GPS: %.6f,%.6f\n", gps.location.lat(), gps.location.lng());
+    }
+    else
+    {
+      display.println("GPS: Searching...");
+    }
+
+    if (gps.speed.isValid())
+    {
+      display.printf("Speed: %.1f km/h\n", gps.speed.kmph());
+    }
+
+    display.display();
+#endif
+  }
+
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    wifiConnected = true;
+    Serial.println("[INFO] Connected to WiFi successfully");
+    Serial.printf("[INFO] IP address: %s\n", WiFi.localIP().toString().c_str());
+    addLog("[INFO] WiFi connected: " + WiFi.localIP().toString());
+
+    // --- mDNS ---
+    if (MDNS.begin("esp32gps"))
+    {
+      Serial.println("mDNS responder started: http://esp32gps.local/");
+      addLog("[INFO] mDNS started: http://esp32gps.local/");
+    }
+    else
+    {
+      Serial.println("Error setting up mDNS responder!");
+      addLog("[ERROR] mDNS failed");
+    }
+  }
+  else
+  {
+    Serial.println("[WARN] WiFi connection timeout, entering AP mode");
+    wifiConnected = false;
+#ifdef wifi_ssid
+    // 预配置模式下，WiFi连接失败后进入数据AP模式
+    enterApMode();
+#else
+    // 无配置时，进入配置AP模式
+    enterConfigMode();
+#endif
+  }
+  // 只有在WiFi连接成功后才尝试时间同步
+  if (wifiConnected)
+  {
+    configTime(8 * 3600, 0, "ntp.aliyun.com", "ntp1.aliyun.com", "pool.ntp.org");
+  }
 
   server.on("/", HTTP_GET, handleRoot);
   server.on("/index.html", HTTP_GET, handleRoot);
@@ -605,7 +736,63 @@ void setup() {
   server.begin();
   Serial.println("HTTP server started");
   listLittleFSFiles(); // 启动后串口输出所有文件列表
-  configTime(8 * 3600, 0, "ntp.aliyun.com", "ntp1.aliyun.com", "pool.ntp.org");
+}
+
+void enterConfigMode()
+{
+  configModeActive = true;
+  Serial.println("[CONFIG MODE] Starting AP for WiFi configuration");
+  addLog("[CONFIG MODE] Starting AP for WiFi configuration");
+
+#ifdef USE_OLED_SCREEN
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("Config Mode");
+  display.println("Connect to:");
+  display.println("ESP32-GPS-Config");
+  display.println("192.168.4.1");
+  display.display();
+#endif
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP("ESP32-GPS-Config");
+  IPAddress apIP(192, 168, 4, 1);
+  WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+
+  // 启动DNS服务器，用于Captive Portal
+  dnsServer.start(53, "*", apIP);
+
+  // 设置路由
+  server.on("/", HTTP_GET, handleWifiConfig); // 根路径直接显示WiFi配置页面
+  server.on("/index.html", HTTP_GET, handleWifiConfig);
+  server.on("/wifi_config", HTTP_GET, handleWifiConfig);
+  server.on("/wifi_save", HTTP_POST, handleWifiSave);
+
+  // Captive Portal支持 - 返回204状态码用于网络连接检测
+  server.on("/generate_204", HTTP_GET, []()
+            { server.send(204, "text/plain", ""); });
+  server.on("/hotspot-detect.html", HTTP_GET, []()
+            {
+    server.sendHeader("Location", "http://192.168.4.1/wifi_config", true);
+    server.send(302, "text/plain", ""); });
+  server.on("/canonical.html", HTTP_GET, []()
+            {
+    server.sendHeader("Location", "http://192.168.4.1/wifi_config", true);
+    server.send(302, "text/plain", ""); });
+
+  // 通配符路由 - 捕获所有其他请求并重定向到配置页面
+  server.onNotFound([]()
+                    {
+    server.sendHeader("Location", "http://192.168.4.1/wifi_config", true);
+    server.send(302, "text/plain", ""); });
+
+  server.begin();
+
+  Serial.println("[CONFIG MODE] AP started: SSID=ESP32-GPS-Config, IP=192.168.4.1");
+  Serial.println("[CONFIG MODE] Captive Portal active - all requests redirect to WiFi config");
+  addLog("[CONFIG MODE] AP started: SSID=ESP32-GPS-Config, IP=192.168.4.1");
+  addLog("[CONFIG MODE] Captive Portal active");
 }
 
 void enterApMode()
@@ -685,23 +872,111 @@ void loop()
       writeTripData(lat, lng, alt, spd);
     }
   }
-
-  // 新增：WiFi掉线检测与AP切换
+  // WiFi掉线检测与AP切换
   if (!apModeActive)
   {
     if (WiFi.status() != WL_CONNECTED)
     {
       if (wifiLostTime == 0)
+      {
         wifiLostTime = millis();
+        Serial.println("[WARN] WiFi connection lost, starting timer...");
+        addLog("[WARN] WiFi connection lost");
+      }
       else if (millis() - wifiLostTime > 30000)
       { // 30秒无网
+        Serial.println("[WARN] WiFi disconnected for 30s, entering AP mode");
         enterApMode();
       }
     }
     else
     {
+      // WiFi重新连接成功
+      if (wifiLostTime > 0)
+      {
+        Serial.println("[INFO] WiFi reconnected successfully");
+        addLog("[INFO] WiFi reconnected: " + WiFi.localIP().toString());
+      }
       wifiLostTime = 0;
-      apModeActive = false;
+    }
+  }
+  else
+  {
+    // 在AP模式下，定期尝试重连原WiFi网络
+    if (millis() - lastWifiRetryTime > WIFI_RETRY_INTERVAL)
+    {
+      lastWifiRetryTime = millis();
+      wifiRetrying = true; // 设置重连状态标志
+      Serial.println("[INFO] Attempting to reconnect to WiFi from AP mode...");
+      addLog("[INFO] Attempting WiFi reconnection...");
+      // 临时切换到Station+AP模式尝试连接
+      WiFi.mode(WIFI_AP_STA);
+      WiFi.begin(wifi_ssid, wifi_password);
+
+      // 等待连接最多15秒
+      unsigned long connectStart = millis();
+      while (WiFi.status() != WL_CONNECTED && millis() - connectStart < 15000)
+      {
+        delay(500);
+        Serial.print(".");
+
+        // 在等待期间继续处理GPS数据
+        if (gpsSerial.available() > 0)
+        {
+          char c = gpsSerial.read();
+          gps.encode(c);
+        }
+      }
+
+      wifiRetrying = false; // 清除重连状态标志
+
+      if (WiFi.status() == WL_CONNECTED)
+      {
+        Serial.println();
+        Serial.println("[INFO] WiFi reconnected successfully, exiting AP mode");
+        addLog("[INFO] WiFi recovered: " + WiFi.localIP().toString());
+
+        // 成功连接，退出AP模式
+        apModeActive = false;
+        wifiLostTime = 0;
+        WiFi.mode(WIFI_STA); // 切换回纯Station模式
+
+        // 重启server和mDNS服务
+        server.close();
+        server.stop();
+        delay(100);
+
+        // 重新设置路由
+        server.on("/", HTTP_GET, handleRoot);
+        server.on("/index.html", HTTP_GET, handleRoot);
+        server.on("/style.css", HTTP_GET, handleStyle);
+        server.on("/script.js", HTTP_GET, handleScript);
+        server.on("/data", handleData);
+        server.on("/start", HTTP_POST, handleStartTrip);
+        server.on("/start", HTTP_GET, handleStartTrip);
+        server.on("/stop", HTTP_POST, handleStopTrip);
+        server.on("/stop", HTTP_GET, handleStopTrip);
+        server.on("/downloads", handleDownloads);
+        server.on("/download", handleDownloadFile);
+        server.begin();
+
+        // 重启mDNS服务
+        MDNS.end();
+        if (MDNS.begin("esp32gps"))
+        {
+          Serial.println("[INFO] mDNS restarted after WiFi recovery");
+          addLog("[INFO] mDNS restarted");
+        }
+      }
+      else
+      {
+        Serial.println();
+        Serial.println("[INFO] WiFi reconnection failed, staying in AP mode");
+        addLog("[INFO] WiFi reconnection failed");
+
+        // 连接失败，切换回纯AP模式
+        WiFi.mode(WIFI_AP);
+      }
     }
   }
 
@@ -718,5 +993,9 @@ void loop()
 #endif
   }
   server.handleClient();
+  if (configModeActive)
+  {
+    dnsServer.processNextRequest(); // 处理DNS请求，用于Captive Portal
+  }
   delay(1); // 减少延迟，提高响应速度
 }
