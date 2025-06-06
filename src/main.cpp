@@ -67,6 +67,10 @@ bool wifiConfigured = false;
 unsigned long wifiLostTime = 0;
 bool apModeActive = false;
 
+// GPS数据超时检测变量
+unsigned long lastGpsUpdateTime = 0;
+const unsigned long GPS_TIMEOUT_MS = 10000; // 10秒超时
+
 void addLog(const String &msg) {
   logBuffer += msg + "<br>";
   // 限制日志长度，避免内存溢出
@@ -91,12 +95,29 @@ String gpsDataInnerHtml()
 {
   String html = "<div class='gps-data'>";
   html += "<h2>GPS 实时数据</h2>";
-  if (gps.location.isValid()) {
+
+  // 检查GPS数据是否超时
+  unsigned long currentTime = millis();
+  bool gpsTimeout = (lastGpsUpdateTime > 0) && (currentTime - lastGpsUpdateTime > GPS_TIMEOUT_MS);
+
+  if (gps.location.isValid() && !gpsTimeout)
+  {
     html += "<p>纬度: <b>" + String(gps.location.lat(), 6) + "</b></p>";
     html += "<p>经度: <b>" + String(gps.location.lng(), 6) + "</b></p>";
     html += "<p>海拔: <b>" + String(gps.altitude.meters()) + " m</b></p>";
     html += "<p>速度: <b>" + String(gps.speed.kmph()) + " km/h</b></p>";
-  } else {
+    // 显示最后更新时间
+    unsigned long timeSinceUpdate = currentTime - lastGpsUpdateTime;
+    html += "<p style='color:#666;'>最后更新: <b>" + String(timeSinceUpdate / 1000) + " 秒前</b></p>";
+  }
+  else if (gpsTimeout)
+  {
+    unsigned long timeSinceUpdate = currentTime - lastGpsUpdateTime;
+    html += "<p style='color:#ff6600;'>⚠️ GPS数据超时 (" + String(timeSinceUpdate / 1000) + " 秒未更新)</p>";
+    html += "<p style='color:#c00;'>请检查GPS模块连接或等待卫星信号...</p>";
+  }
+  else
+  {
     html += "<p style='color:#c00;'>等待 GPS 定位数据...</p>";
   }
   html += "</div>";
@@ -311,28 +332,44 @@ void updateOled()
   display.setCursor(0, 0);
   display.println("GPS trip");
   display.setTextSize(1);
-  if (gps.location.isValid())
+
+  // 检查GPS数据是否超时
+  unsigned long currentTime = millis();
+  bool gpsTimeout = (lastGpsUpdateTime > 0) && (currentTime - lastGpsUpdateTime > GPS_TIMEOUT_MS);
+
+  if (gps.location.isValid() && !gpsTimeout)
   {
     display.printf("Lat: %.6f\n", gps.location.lat());
     display.printf("Lng: %.6f\n", gps.location.lng());
     display.printf("Alt: %.1f m\n", gps.altitude.meters());
     display.printf("Spd: %.1f km/h\n", gps.speed.kmph());
+    // 显示最后更新时间
+    unsigned long timeSinceUpdate = currentTime - lastGpsUpdateTime;
+    display.printf("Update: %lus ago\n", timeSinceUpdate / 1000);
+  }
+  else if (gpsTimeout)
+  {
+    unsigned long timeSinceUpdate = currentTime - lastGpsUpdateTime;
+    display.printf("GPS TIMEOUT!\n");
+    display.printf("No update: %lus\n", timeSinceUpdate / 1000);
+    display.println("Check connection");
   }
   else
   {
     display.println("wait for signal");
   }
+
   if (tripActive)
   {
     display.setTextSize(1);
-    display.setCursor(0, 48);
-    display.print("active");
+    display.setCursor(0, 56);
+    display.print("Trip: ON");
   }
   else
   {
     display.setTextSize(1);
-    display.setCursor(0, 48);
-    display.print("sleep");
+    display.setCursor(0, 56);
+    display.print("Trip: OFF");
   }
   display.display();
 }
@@ -345,17 +382,35 @@ void updateSt7735()
   tft.setTextSize(1);
   tft.setCursor(0, 0);
   tft.println("GPS 码表");
-  if (gps.location.isValid())
+
+  // 检查GPS数据是否超时
+  unsigned long currentTime = millis();
+  bool gpsTimeout = (lastGpsUpdateTime > 0) && (currentTime - lastGpsUpdateTime > GPS_TIMEOUT_MS);
+
+  if (gps.location.isValid() && !gpsTimeout)
   {
     tft.printf("Lat: %.6f\n", gps.location.lat());
     tft.printf("Lng: %.6f\n", gps.location.lng());
     tft.printf("Alt: %.1f m\n", gps.altitude.meters());
     tft.printf("Spd: %.1f km/h\n", gps.speed.kmph());
+    // 显示最后更新时间
+    unsigned long timeSinceUpdate = currentTime - lastGpsUpdateTime;
+    tft.printf("更新: %lu秒前\n", timeSinceUpdate / 1000);
+  }
+  else if (gpsTimeout)
+  {
+    unsigned long timeSinceUpdate = currentTime - lastGpsUpdateTime;
+    tft.setTextColor(ST77XX_RED);
+    tft.printf("GPS超时!\n");
+    tft.printf("未更新: %lu秒\n", timeSinceUpdate / 1000);
+    tft.setTextColor(ST77XX_WHITE);
+    tft.println("检查连接...");
   }
   else
   {
     tft.println("等待定位...");
   }
+
   if (tripActive)
   {
     tft.setCursor(0, 48);
@@ -579,10 +634,10 @@ void enterApMode()
   addLog("[AP MODE] Started AP for data access: SSID=GPS-AP-Data");
 }
 
-void loop() {
-  // 每2秒输出一次调试日志，表明主循环正常运行
+void loop()
+{ // 每10秒输出一次调试日志，减少日志频率
   static unsigned long lastDebug = 0;
-  if (millis() - lastDebug > 2000)
+  if (millis() - lastDebug > 10000)
   {
     addLog("[DEBUG] loop running, waiting for GPS data...");
     lastDebug = millis();
@@ -602,10 +657,9 @@ void loop() {
     else if (c != '\r')
     {
       lineBuffer += c;
-    }
-
-    // 如果 GPS 数据更新了，打印相关信息
+    } // 如果 GPS 数据更新了，打印相关信息
     if (gps.location.isUpdated()) {
+      lastGpsUpdateTime = millis(); // 记录GPS数据更新时间
       String logMsg = "Latitude= " + String(gps.location.lat(), 6) +
                       " Longitude= " + String(gps.location.lng(), 6) +
                       " Altitude= " + String(gps.altitude.meters()) +
@@ -651,12 +705,18 @@ void loop() {
     }
   }
 
+  // 屏幕更新限制频率，避免过于频繁
+  static unsigned long lastScreenUpdate = 0;
+  if (millis() - lastScreenUpdate > 100) // 每100ms更新一次屏幕
+  {
+    lastScreenUpdate = millis();
 #ifdef USE_OLED_SCREEN
-  updateOled();
+    updateOled();
 #endif
 #ifdef USE_ST7735_SCREEN
-  updateSt7735();
+    updateSt7735();
 #endif
+  }
   server.handleClient();
-  delay(10); // 避免看门狗复位
+  delay(1); // 减少延迟，提高响应速度
 }

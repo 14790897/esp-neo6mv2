@@ -17,7 +17,7 @@ class GPSTracker {
         this.fetchDownloadList();
         
         // 设置定时刷新
-        setInterval(() => this.fetchData(), 2000);
+        setInterval(() => this.fetchData(), 500);
         setInterval(() => this.fetchDownloadList(), 10000); // 下载列表更新频率较低
         
         // 监听网络状态
